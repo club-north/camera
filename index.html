@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-title" content="FPV Camera">
+    <link rel="manifest" href="manifest.json">
+    <link rel="apple-touch-icon" href="icon.png">
+    <title>FPV Camera - 車載カメラ</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { background: #000; overflow: hidden; font-family: system-ui; }
+        video { width: 100%; height: 100vh; object-fit: cover; transform: scaleX(-1); }
+        .info { position: fixed; bottom: 0; left: 0; right: 0; background: rgba(0,0,0,0.9); color: white; text-align: center; padding: 20px; backdrop-filter: blur(10px); z-index: 10; }
+        .code { background: #00a86b; padding: 12px; border-radius: 12px; margin: 10px 0; font-family: monospace; font-size: 12px; word-break: break-all; cursor: pointer; }
+        .status { display: inline-block; width: 10px; height: 10px; border-radius: 50%; background: #ff3333; margin-right: 8px; }
+        .status.on { background: #33ff33; box-shadow: 0 0 8px #33ff33; }
+        button { background: #00a86b; border: none; color: white; padding: 10px 24px; border-radius: 30px; margin-top: 10px; font-size: 14px; cursor: pointer; }
+        button:active { transform: scale(0.96); }
+        .tips { font-size: 11px; color: #aaa; margin-top: 10px; }
+        .header { position: fixed; top: 0; left: 0; right: 0; background: rgba(0,0,0,0.7); padding: 12px; text-align: center; font-size: 14px; color: #00a86b; z-index: 10; }
+    </style>
+</head>
+<body>
+    <div class="header">📷 FPV CAMERA - 車載カメラ</div>
+    <video id="localVideo" autoplay playsinline muted></video>
+    <div class="info">
+        <div><span class="status" id="statusLed"></span><span id="statusText">カメラ起動中...</span></div>
+        <div class="code" id="connectionCode">読み込み中...</div>
+        <button id="copyBtn">📋 コードをコピー</button>
+        <div class="tips">💡 このコードを操縦用スマホに貼り付けてください</div>
+    </div>
+    <script>
+        (function(){
+            const config = { iceServers: [{urls:"stun:stun.l.google.com:19302"},{urls:"stun:stun1.l.google.com:19302"}] };
+            let pc=null, stream=null;
+            const video = document.getElementById("localVideo");
+            const codeDiv = document.getElementById("connectionCode");
+            const copyBtn = document.getElementById("copyBtn");
+            const statusLed = document.getElementById("statusLed");
+            const statusText = document.getElementById("statusText");
+            
+            async function startCamera(){
+                try{
+                    stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { exact: "environment" }, width:1280, height:720 } });
+                    video.srcObject = stream;
+                    statusLed.classList.add("on");
+                    statusText.innerHTML = "📷 背面カメラ起動";
+                    return true;
+                }catch(e){
+                    try{
+                        stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "user" } });
+                        video.srcObject = stream;
+                        statusLed.classList.add("on");
+                        statusText.innerHTML = "📷 前面カメラ起動";
+                        return true;
+                    }catch(e2){
+                        statusText.innerHTML = "❌ カメラエラー";
+                        return false;
+                    }
+                }
+            }
+            
+            async function createConnection(){
+                pc = new RTCPeerConnection(config);
+                stream.getTracks().forEach(t => pc.addTrack(t, stream));
+                const offer = await pc.createOffer();
+                await pc.setLocalDescription(offer);
+                await new Promise(r => { if(pc.iceGatheringState==="complete") r(); else pc.onicegatheringstatechange = ()=> pc.iceGatheringState==="complete" && r(); });
+                const code = btoa(JSON.stringify({ sdp: pc.localDescription.sdp, type: "offer" }));
+                codeDiv.textContent = code;
+                statusText.innerHTML = "✅ 接続コード準備完了";
+                pc.oniceconnectionstatechange = () => {
+                    if(pc.iceConnectionState === "connected") statusText.innerHTML = "🔗 接続中！";
+                    else if(pc.iceConnectionState === "disconnected") statusText.innerHTML = "⚠️ 切断されました";
+                };
+            }
+            
+            copyBtn.onclick = () => {
+                navigator.clipboard.writeText(codeDiv.textContent);
+                copyBtn.textContent = "✅ コピーしました！";
+                setTimeout(() => copyBtn.textContent = "📋 コードをコピー", 2000);
+            };
+            
+            (async()=>{ if(await startCamera()) await createConnection(); })();
+            
+            window.addEventListener("beforeunload", ()=>{
+                if(stream) stream.getTracks().forEach(t=>t.stop());
+                if(pc) pc.close();
+            });
+            if('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js');
+        })();
+    </script>
+</body>
+</html>
